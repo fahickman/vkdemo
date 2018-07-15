@@ -40,15 +40,19 @@ OTHER DEALINGS IN THE SOFTWARE.
 typedef struct Vulkan {
    VkInstance instance;
 
+#define VK_BOOT_FUNC(ret, name, args) ret (VKAPI_PTR *name) args
+#define VK_INSTANCE_FUNC VK_BOOT_FUNC
+#include "vkfuncs.h"
+#undef VK_INSTANCE_FUNC
+#undef VK_BOOT_FUNC
+
 #ifndef NDEBUG
    VkDebugUtilsMessengerEXT debugCallback;
 #endif
 
-#define VK_FUNC(ret, name, args) ret (VKAPI_PTR *name)args
-#define VK_BOOT_FUNC VK_FUNC
-#include "vkfuncs.h"
-#undef VK_FUNC
-#undef VK_BOOT_FUNC
+   uint32_t physicalDeviceCount;
+   VkPhysicalDevice *physicalDevices;
+   VkPhysicalDeviceProperties *physicalDeviceProperties;
 } Vulkan;
 
 typedef struct VulkanFrame {
@@ -61,10 +65,11 @@ typedef struct VulkanFrame {
 typedef struct VulkanDevice {
    const Vulkan *vk;
 
-   uint32_t physicalDeviceCount;
-   uint32_t physicalDeviceIdx;
-   VkPhysicalDevice *physicalDevices;
-   VkPhysicalDeviceProperties *physicalDeviceProperties;
+#define VK_DEVICE_FUNC(ret, name, args) ret (VKAPI_PTR *name) args
+#include "vkfuncs.h"
+#undef VK_DEVICE_FUNC
+
+   uint32_t physicalDeviceIdx; // index into vk->physicalDevices/physicalDeviceProperties
 
    uint32_t queueFamilyPropertyCount;
    uint32_t queueFamilyIndex;
@@ -85,7 +90,3 @@ typedef struct VulkanDevice {
 
    VkCommandPool commandPool;
 } VulkanDevice;
-
-extern Vulkan g_vulkan;
-extern VulkanDevice g_device;
-

@@ -31,12 +31,12 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 #include "vkdemo.h"
 
-int DrawFrame(float dt);
-int InitResources(void);
-void UninitResources(void);
+int DrawFrame(const VulkanDevice *device, float dt);
+int InitResources(const VulkanDevice *device);
+void UninitResources(const VulkanDevice *device);
 
-Vulkan g_vulkan;
-VulkanDevice g_device;
+static Vulkan s_vulkan;
+static VulkanDevice s_device;
 
 static HMODULE s_vulkanLib;
 
@@ -63,7 +63,7 @@ static int initSwapchain(VulkanDevice *device, HWND hwnd)
    device->surfaceWidth = rect.right - rect.left;
    device->surfaceHeight = rect.bottom - rect.top;
 
-   VkPhysicalDevice physicalDevice = device->physicalDevices[device->physicalDeviceIdx];
+   VkPhysicalDevice physicalDevice = vk->physicalDevices[device->physicalDeviceIdx];
    uint32_t frameCount = ARRAY_COUNT(device->frames);
 
    VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {
@@ -88,10 +88,10 @@ static int initSwapchain(VulkanDevice *device, HWND hwnd)
    uint32_t surfaceFormatCount = 0;
    VkSurfaceFormatKHR *surfaceFormats;
 
-   VK_VERIFY(vk->vkGetPhysicalDeviceSurfaceFormatsKHR(device->physicalDevices[device->physicalDeviceIdx],
+   VK_VERIFY(vk->vkGetPhysicalDeviceSurfaceFormatsKHR(vk->physicalDevices[device->physicalDeviceIdx],
       device->surface, &surfaceFormatCount, NULL));
    surfaceFormats = malloc(sizeof(*surfaceFormats) * surfaceFormatCount);
-   VK_VERIFY(vk->vkGetPhysicalDeviceSurfaceFormatsKHR(device->physicalDevices[device->physicalDeviceIdx],
+   VK_VERIFY(vk->vkGetPhysicalDeviceSurfaceFormatsKHR(vk->physicalDevices[device->physicalDeviceIdx],
       device->surface, &surfaceFormatCount, surfaceFormats));
 
    static const VkFormat desiredFormats[] = {
@@ -139,13 +139,13 @@ foundFormat:
 
    free(surfaceFormats);
 
-   VK_VERIFY(vk->vkCreateSwapchainKHR(device->device, &swapchainCreateInfo, NULL, &device->swapchain));
+   VK_VERIFY(device->vkCreateSwapchainKHR(device->device, &swapchainCreateInfo, NULL, &device->swapchain));
 
-   VK_VERIFY(vk->vkGetSwapchainImagesKHR(device->device, device->swapchain, &device->swapchainImageCount, NULL));
+   VK_VERIFY(device->vkGetSwapchainImagesKHR(device->device, device->swapchain, &device->swapchainImageCount, NULL));
    device->swapchainImages = malloc(sizeof(*device->swapchainImages) * device->swapchainImageCount);
-   VK_VERIFY(vk->vkGetSwapchainImagesKHR(device->device, device->swapchain, &device->swapchainImageCount, device->swapchainImages));
+   VK_VERIFY(device->vkGetSwapchainImagesKHR(device->device, device->swapchain, &device->swapchainImageCount, device->swapchainImages));
 
-   return InitResources();
+   return InitResources(device);
 }
 
 static void uninitSwapchain(VulkanDevice *device)
@@ -153,48 +153,33 @@ static void uninitSwapchain(VulkanDevice *device)
    ASSERT(device && device->vk);
    const Vulkan *vk = device->vk;
 
-   VK_VERIFY(vk->vkDeviceWaitIdle(device->device));
+   VK_VERIFY(device->vkDeviceWaitIdle(device->device));
 
-   UninitResources();
+   UninitResources(device);
 
    free(device->swapchainImages);
    device->swapchainImages = NULL;
    device->swapchainImageCount = 0;
 
-   vk->vkDestroySwapchainKHR(device->device, device->swapchain, NULL);
+   device->vkDestroySwapchainKHR(device->device, device->swapchain, NULL);
    device->swapchain = VK_NULL_HANDLE;
 
    vk->vkDestroySurfaceKHR(vk->instance, device->surface, NULL);
    device->surface = VK_NULL_HANDLE;
 }
 
-static int initDevice(const Vulkan *vk, VulkanDevice *device)
+static int createDevice(const Vulkan *vk, uint32_t physicalDeviceIdx, VulkanDevice *device)
 {
    ASSERT(vk && device);
+   ASSERT(physicalDeviceIdx < vk->physicalDeviceCount);
 
    memset(device, 0, sizeof(*device));
    device->vk = vk;
 
-   uint32_t physicalDeviceCount = 0;
-   VK_VERIFY(vk->vkEnumeratePhysicalDevices(vk->instance, &physicalDeviceCount, NULL));
-   if (!physicalDeviceCount) {
-      return 0;
-   }
-
-   device->physicalDevices = malloc(sizeof(*device->physicalDevices) * physicalDeviceCount);
-   device->physicalDeviceProperties = malloc(sizeof(*device->physicalDeviceProperties) * physicalDeviceCount);
-   VK_VERIFY(vk->vkEnumeratePhysicalDevices(vk->instance, &physicalDeviceCount, device->physicalDevices));
-
-   for (uint32_t i = 0; i < physicalDeviceCount; ++i) {
-      vk->vkGetPhysicalDeviceProperties(device->physicalDevices[i], &device->physicalDeviceProperties[i]);
-   }
-   device->physicalDeviceCount = physicalDeviceCount;
-   device->physicalDeviceIdx = 0;   // just use first device found
-
    uint32_t queueFamilyPropertyCount = 0;
-   vk->vkGetPhysicalDeviceQueueFamilyProperties(device->physicalDevices[device->physicalDeviceIdx], &queueFamilyPropertyCount, NULL);
+   vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physicalDevices[physicalDeviceIdx], &queueFamilyPropertyCount, NULL);
    device->queueFamilyProperties = malloc(sizeof(*device->queueFamilyProperties) * queueFamilyPropertyCount);
-   vk->vkGetPhysicalDeviceQueueFamilyProperties(device->physicalDevices[device->physicalDeviceIdx], &queueFamilyPropertyCount, device->queueFamilyProperties);
+   vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physicalDevices[physicalDeviceIdx], &queueFamilyPropertyCount, device->queueFamilyProperties);
 
    uint32_t desiredQueueIndex = queueFamilyPropertyCount;
    for (uint32_t i = 0; i < queueFamilyPropertyCount; ++i) {
@@ -236,9 +221,13 @@ static int initDevice(const Vulkan *vk, VulkanDevice *device)
       .pEnabledFeatures = NULL,
    };
 
-   VK_VERIFY(vk->vkCreateDevice(device->physicalDevices[0], &createInfo, NULL, &device->device));
+   VK_VERIFY(vk->vkCreateDevice(vk->physicalDevices[physicalDeviceIdx], &createInfo, NULL, &device->device));
 
-   vk->vkGetDeviceQueue(device->device, device->queueFamilyIndex, 0, &device->queue);
+#define VK_DEVICE_FUNC(ret, name, args) device->name = (ret (VKAPI_PTR *)args) vk->vkGetDeviceProcAddr(device->device, #name); ASSERT(device->name)
+#include "vkfuncs.h"
+#undef VK_DEVICE_FUNC
+
+   device->vkGetDeviceQueue(device->device, device->queueFamilyIndex, 0, &device->queue);
 
    VkCommandPoolCreateInfo cpCreateInfo = {
       .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -247,7 +236,7 @@ static int initDevice(const Vulkan *vk, VulkanDevice *device)
       .queueFamilyIndex = desiredQueueIndex,
    };
 
-   VK_VERIFY(vk->vkCreateCommandPool(device->device, &cpCreateInfo, NULL, &device->commandPool));
+   VK_VERIFY(device->vkCreateCommandPool(device->device, &cpCreateInfo, NULL, &device->commandPool));
 
    // per-frame data
    {
@@ -270,17 +259,18 @@ static int initDevice(const Vulkan *vk, VulkanDevice *device)
       };
 
       for (uint32_t i = 0; i < ARRAY_COUNT(device->frames); ++i) {
-         VK_VERIFY(vk->vkCreateSemaphore(device->device, &semaphoreCreateInfo, NULL, &device->frames[i].imageAcquired));
-         VK_VERIFY(vk->vkCreateSemaphore(device->device, &semaphoreCreateInfo, NULL, &device->frames[i].drawComplete));
-         VK_VERIFY(vk->vkCreateFence(device->device, &fenceCreateInfo, NULL, &device->frames[i].frameComplete));
-         VK_VERIFY(vk->vkAllocateCommandBuffers(device->device, &cbAllocInfo, &device->frames[i].commandBuffer));
+         VK_VERIFY(device->vkCreateSemaphore(device->device, &semaphoreCreateInfo, NULL, &device->frames[i].imageAcquired));
+         VK_VERIFY(device->vkCreateSemaphore(device->device, &semaphoreCreateInfo, NULL, &device->frames[i].drawComplete));
+         VK_VERIFY(device->vkCreateFence(device->device, &fenceCreateInfo, NULL, &device->frames[i].frameComplete));
+         VK_VERIFY(device->vkAllocateCommandBuffers(device->device, &cbAllocInfo, &device->frames[i].commandBuffer));
       }
    }
 
+   device->physicalDeviceIdx = physicalDeviceIdx;
    return 1;
 }
 
-static void uninitDevice(VulkanDevice *device)
+static void destroyDevice(VulkanDevice *device)
 {
    if (device && device->vk) {
       const Vulkan *vk = device->vk;
@@ -288,28 +278,22 @@ static void uninitDevice(VulkanDevice *device)
       uninitSwapchain(device);
 
       for (uint32_t i = 0; i < ARRAY_COUNT(device->frames); ++i) {
-         vk->vkDestroySemaphore(device->device, device->frames[i].imageAcquired, NULL);
+         device->vkDestroySemaphore(device->device, device->frames[i].imageAcquired, NULL);
          device->frames[i].imageAcquired = VK_NULL_HANDLE;
-         vk->vkDestroySemaphore(device->device, device->frames[i].drawComplete, NULL);
+         device->vkDestroySemaphore(device->device, device->frames[i].drawComplete, NULL);
          device->frames[i].drawComplete = VK_NULL_HANDLE;
-         vk->vkDestroyFence(device->device, device->frames[i].frameComplete, NULL);
+         device->vkDestroyFence(device->device, device->frames[i].frameComplete, NULL);
          device->frames[i].frameComplete = VK_NULL_HANDLE;
-         vk->vkFreeCommandBuffers(device->device, device->commandPool, 1, &device->frames[i].commandBuffer);
+         device->vkFreeCommandBuffers(device->device, device->commandPool, 1, &device->frames[i].commandBuffer);
          device->frames[i].commandBuffer = VK_NULL_HANDLE;
       }
 
-      vk->vkDestroyCommandPool(device->device, device->commandPool, NULL);
+      device->vkDestroyCommandPool(device->device, device->commandPool, NULL);
       device->commandPool = VK_NULL_HANDLE;
 
       free(device->queueFamilyProperties);
       device->queueFamilyProperties = NULL;
       device->queueFamilyPropertyCount = 0;
-
-      free(device->physicalDeviceProperties);
-      device->physicalDeviceProperties = NULL;
-      free(device->physicalDevices);
-      device->physicalDevices = NULL;
-      device->physicalDeviceCount = 0;
 
       vk->vkDestroyDevice(device->device, NULL);
       device->device = VK_NULL_HANDLE;
@@ -398,13 +382,30 @@ static int initVulkan(Vulkan *vk)
    }
 
    // load the rest of the API
-#define VK_FUNC(ret, name, args) vk->name = (ret (VKAPI_PTR *)args) vk->vkGetInstanceProcAddr(vk->instance, #name); ASSERT(vk->name)
+#define VK_INSTANCE_FUNC(ret, name, args) vk->name = (ret (VKAPI_PTR *)args) vk->vkGetInstanceProcAddr(vk->instance, #name); ASSERT(vk->name)
 #include "vkfuncs.h"
-#undef VK_FUNC
+#undef VK_INSTANCE_FUNC
 
 #ifndef NDEBUG
    VK_VERIFY(vk->vkCreateDebugUtilsMessengerEXT(vk->instance, &debugMessengerCreateInfo, NULL, &vk->debugCallback));
 #endif
+
+   uint32_t physicalDeviceCount = 0;
+   VK_VERIFY(vk->vkEnumeratePhysicalDevices(vk->instance, &physicalDeviceCount, NULL));
+   if (!physicalDeviceCount) {
+      vk->vkDestroyInstance(vk->instance, NULL);
+      FreeLibrary(s_vulkanLib);
+      return 0;
+   }
+
+   vk->physicalDevices = malloc(sizeof(*vk->physicalDevices) * physicalDeviceCount);
+   vk->physicalDeviceProperties = malloc(sizeof(*vk->physicalDeviceProperties) * physicalDeviceCount);
+   VK_VERIFY(vk->vkEnumeratePhysicalDevices(vk->instance, &physicalDeviceCount, vk->physicalDevices));
+
+   for (uint32_t i = 0; i < physicalDeviceCount; ++i) {
+      vk->vkGetPhysicalDeviceProperties(vk->physicalDevices[i], &vk->physicalDeviceProperties[i]);
+   }
+   vk->physicalDeviceCount = physicalDeviceCount;
 
    return 1;
 }
@@ -431,18 +432,18 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
       s_lastTime = curTime;
 
       BeginPaint(hwnd, &ps);
-      if (!DrawFrame((float)dt)) {
+      if (!DrawFrame(&s_device, (float)dt)) {
          // handle device lost
-         uninitSwapchain(&g_device);
-         initSwapchain(&g_device, hwnd);
+         uninitSwapchain(&s_device);
+         initSwapchain(&s_device, hwnd);
       }
       EndPaint(hwnd, &ps);
       return 0;
    }
    case WM_SIZE:
       if (wParam != SIZE_MINIMIZED) {
-         uninitSwapchain(&g_device);
-         initSwapchain(&g_device, hwnd);
+         uninitSwapchain(&s_device);
+         initSwapchain(&s_device, hwnd);
       }
       return 0;
    default:
@@ -453,6 +454,12 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 static void uninitVulkan(Vulkan *vk)
 {
    if (vk) {
+      free(vk->physicalDeviceProperties);
+      vk->physicalDeviceProperties = NULL;
+      free(vk->physicalDevices);
+      vk->physicalDevices = NULL;
+      vk->physicalDeviceCount = 0;
+
 #ifndef NDEBUG
       vk->vkDestroyDebugUtilsMessengerEXT(vk->instance, vk->debugCallback, NULL);
 #endif
@@ -465,14 +472,16 @@ static void uninitVulkan(Vulkan *vk)
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
 {
-   if (!initVulkan(&g_vulkan)) {
+   if (!initVulkan(&s_vulkan)) {
       //FIXME: better error message.
       MessageBox(NULL, L"Could not initialize Vulkan library.", L"Error", MB_ICONERROR | MB_OK);
       return -1;
    }
-   if (!initDevice(&g_vulkan, &g_device)) {
+
+   uint32_t physicalDeviceIdx = 0;   // just use first device found
+   if (!createDevice(&s_vulkan, physicalDeviceIdx, &s_device)) {
       MessageBox(NULL, L"Could not find suitable Vulkan device.", L"Error", MB_ICONERROR | MB_OK);
-      uninitVulkan(&g_vulkan);
+      uninitVulkan(&s_vulkan);
       return -1;
    }
 
@@ -493,8 +502,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
    ATOM atom = RegisterClassEx(&wcex);
    if (!atom) {
-      uninitDevice(&g_device);
-      uninitVulkan(&g_vulkan);
+      destroyDevice(&s_device);
+      uninitVulkan(&s_vulkan);
       return -1;
    }
 
@@ -515,7 +524,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
       RedrawWindow(hwnd, NULL, NULL, RDW_INTERNALPAINT);
    }
 
-   uninitDevice(&g_device);
-   uninitVulkan(&g_vulkan);
+   destroyDevice(&s_device);
+   uninitVulkan(&s_vulkan);
    return (int)msg.wParam;
 }

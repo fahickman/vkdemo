@@ -239,16 +239,13 @@ static inline void mat4LookAt(Mat4 *r, Vec3 eye, Vec3 target, Vec3 up)
    r->m[3].w = 1.0f;
 }
 
-int InitResources(void)
+int InitResources(const VulkanDevice *device)
 {
-   const Vulkan *vk = g_device.vk;
-   ASSERT(vk);
-
    // create render pass
    {
       VkAttachmentDescription attachmentDesc = {
          .flags = 0,
-         .format = g_device.surfaceFormat,
+         .format = device->surfaceFormat,
          .samples = VK_SAMPLE_COUNT_1_BIT,
          .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
          .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -288,19 +285,19 @@ int InitResources(void)
          .dependencyCount = 0,
          .pDependencies = NULL,
       };
-      VK_VERIFY(vk->vkCreateRenderPass(g_device.device, &passCreateInfo, NULL, &s_resources.renderPass));
+      VK_VERIFY(device->vkCreateRenderPass(device->device, &passCreateInfo, NULL, &s_resources.renderPass));
    }
 
    // create frame buffers
-   s_resources.framebuffers = malloc(sizeof(*s_resources.framebuffers) * g_device.swapchainImageCount);
-   for (uint32_t i = 0; i < g_device.swapchainImageCount; ++i) {
+   s_resources.framebuffers = malloc(sizeof(*s_resources.framebuffers) * device->swapchainImageCount);
+   for (uint32_t i = 0; i < device->swapchainImageCount; ++i) {
       VkImageViewCreateInfo imageViewCreateInfo = {
          .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
          .pNext = NULL,
          .flags = 0,
-         .image = g_device.swapchainImages[i],
+         .image = device->swapchainImages[i],
          .viewType = VK_IMAGE_VIEW_TYPE_2D,
-         .format = g_device.surfaceFormat,
+         .format = device->surfaceFormat,
          .components = {
             .r = VK_COMPONENT_SWIZZLE_R,
             .g = VK_COMPONENT_SWIZZLE_G,
@@ -315,7 +312,7 @@ int InitResources(void)
             .layerCount = 1
          },
       };
-      VK_VERIFY(vk->vkCreateImageView(g_device.device, &imageViewCreateInfo, NULL, &s_resources.framebuffers[i].view));
+      VK_VERIFY(device->vkCreateImageView(device->device, &imageViewCreateInfo, NULL, &s_resources.framebuffers[i].view));
 
       VkFramebufferCreateInfo framebufferCreateInfo = {
          .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
@@ -324,11 +321,11 @@ int InitResources(void)
          .renderPass = s_resources.renderPass,
          .attachmentCount = 1,
          .pAttachments = &s_resources.framebuffers[i].view,
-         .width = g_device.surfaceWidth,
-         .height = g_device.surfaceHeight,
+         .width = device->surfaceWidth,
+         .height = device->surfaceHeight,
          .layers = 1,
       };
-      VK_VERIFY(vk->vkCreateFramebuffer(g_device.device, &framebufferCreateInfo, NULL, &s_resources.framebuffers[i].framebuffer));
+      VK_VERIFY(device->vkCreateFramebuffer(device->device, &framebufferCreateInfo, NULL, &s_resources.framebuffers[i].framebuffer));
    }
    
    // create pipeline
@@ -585,7 +582,7 @@ int InitResources(void)
          .pCode = (const uint32_t *)g_vertexShaderCode,
       };
 
-      VK_VERIFY(vk->vkCreateShaderModule(g_device.device, &vertexShaderCreateInfo, NULL, &s_resources.vertexShader));
+      VK_VERIFY(device->vkCreateShaderModule(device->device, &vertexShaderCreateInfo, NULL, &s_resources.vertexShader));
 
       VkShaderModuleCreateInfo fragmentShaderCreateInfo = {
          .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -595,7 +592,7 @@ int InitResources(void)
          .pCode = (const uint32_t *)g_fragmentShaderCode,
       };
 
-      VK_VERIFY(vk->vkCreateShaderModule(g_device.device, &fragmentShaderCreateInfo, NULL, &s_resources.fragmentShader));
+      VK_VERIFY(device->vkCreateShaderModule(device->device, &fragmentShaderCreateInfo, NULL, &s_resources.fragmentShader));
 
       VkPipelineShaderStageCreateInfo shaderStageCreateInfos[2] = {
          {
@@ -639,8 +636,8 @@ int InitResources(void)
       VkViewport viewport = {
          .x = 0.0f,
          .y = 0.0f,
-         .width = (float) g_device.surfaceWidth,
-         .height = (float) g_device.surfaceHeight,
+         .width = (float) device->surfaceWidth,
+         .height = (float) device->surfaceHeight,
          .minDepth = 0.0f,
          .maxDepth = 1.0f,
       };
@@ -651,8 +648,8 @@ int InitResources(void)
             .y = 0,
           },
          .extent = {
-            .width = g_device.surfaceWidth,
-            .height = g_device.surfaceHeight,
+            .width = device->surfaceWidth,
+            .height = device->surfaceHeight,
           },
       };
 
@@ -763,7 +760,7 @@ int InitResources(void)
          .pPushConstantRanges = &pushConstants,
       };
 
-      VK_VERIFY(vk->vkCreatePipelineLayout(g_device.device, &pipelineLayoutCreateInfo, NULL, &s_resources.pipelineLayout));
+      VK_VERIFY(device->vkCreatePipelineLayout(device->device, &pipelineLayoutCreateInfo, NULL, &s_resources.pipelineLayout));
 
       VkGraphicsPipelineCreateInfo pipelineCreateInfo = {
          .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -787,62 +784,56 @@ int InitResources(void)
          .basePipelineIndex = -1,
       };
 
-      VK_VERIFY(vk->vkCreateGraphicsPipelines(g_device.device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, NULL, &s_resources.pipeline));
+      VK_VERIFY(device->vkCreateGraphicsPipelines(device->device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, NULL, &s_resources.pipeline));
    }
 
    return 1;
 }
 
-void UninitResources(void)
+void UninitResources(const VulkanDevice *device)
 {
-   const Vulkan *vk = g_device.vk;
-   ASSERT(vk);
+   VK_VERIFY(device->vkDeviceWaitIdle(device->device));
 
-   VK_VERIFY(vk->vkDeviceWaitIdle(g_device.device));
-
-   vk->vkDestroyPipeline(g_device.device, s_resources.pipeline, NULL);
+   device->vkDestroyPipeline(device->device, s_resources.pipeline, NULL);
    s_resources.pipeline = VK_NULL_HANDLE;
-   vk->vkDestroyPipelineLayout(g_device.device, s_resources.pipelineLayout, NULL);
+   device->vkDestroyPipelineLayout(device->device, s_resources.pipelineLayout, NULL);
    s_resources.pipelineLayout = VK_NULL_HANDLE;
-   vk->vkDestroyShaderModule(g_device.device, s_resources.fragmentShader, NULL);
+   device->vkDestroyShaderModule(device->device, s_resources.fragmentShader, NULL);
    s_resources.fragmentShader = VK_NULL_HANDLE;
-   vk->vkDestroyShaderModule(g_device.device, s_resources.vertexShader, NULL);
+   device->vkDestroyShaderModule(device->device, s_resources.vertexShader, NULL);
    s_resources.vertexShader = VK_NULL_HANDLE;
 
-   for (uint32_t i = 0; i < g_device.swapchainImageCount; ++i) {
-      vk->vkDestroyImageView(g_device.device, s_resources.framebuffers[i].view, NULL);
-      vk->vkDestroyFramebuffer(g_device.device, s_resources.framebuffers[i].framebuffer, NULL);
+   for (uint32_t i = 0; i < device->swapchainImageCount; ++i) {
+      device->vkDestroyImageView(device->device, s_resources.framebuffers[i].view, NULL);
+      device->vkDestroyFramebuffer(device->device, s_resources.framebuffers[i].framebuffer, NULL);
    }
    free(s_resources.framebuffers);
    s_resources.framebuffers = NULL;
 
-   vk->vkDestroyRenderPass(g_device.device, s_resources.renderPass, NULL);
+   device->vkDestroyRenderPass(device->device, s_resources.renderPass, NULL);
    s_resources.renderPass = VK_NULL_HANDLE;
 }
 
-int DrawFrame(float dt)
+int DrawFrame(const VulkanDevice *device, float dt)
 {
-   Vulkan *vk = &g_vulkan;
-   VulkanDevice *device = &g_device;
-
    VkRect2D backBufferRect = {
       .offset = {
          .x = 0,
          .y = 0,
       },
       .extent = {
-         .width = g_device.surfaceWidth,
-         .height = g_device.surfaceHeight,
+         .width = device->surfaceWidth,
+         .height = device->surfaceHeight,
       },
    };
 
    uint32_t curFrame = s_frameNum++ % ARRAY_COUNT(device->frames);
-   VK_VERIFY(vk->vkWaitForFences(device->device, 1, &device->frames[curFrame].frameComplete, VK_TRUE, UINT64_MAX));
-   VK_VERIFY(vk->vkResetFences(device->device, 1, &device->frames[curFrame].frameComplete));
+   VK_VERIFY(device->vkWaitForFences(device->device, 1, &device->frames[curFrame].frameComplete, VK_TRUE, UINT64_MAX));
+   VK_VERIFY(device->vkResetFences(device->device, 1, &device->frames[curFrame].frameComplete));
 
    VkFence nullFence = VK_NULL_HANDLE;
    uint32_t imageIdx;
-   VkResult result = vk->vkAcquireNextImageKHR(device->device, device->swapchain, UINT64_MAX,
+   VkResult result = device->vkAcquireNextImageKHR(device->device, device->swapchain, UINT64_MAX,
       device->frames[curFrame].imageAcquired, nullFence, &imageIdx);
    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
       return 0;
@@ -858,7 +849,7 @@ int DrawFrame(float dt)
       .pInheritanceInfo = NULL,
    };
 
-   VK_VERIFY(vk->vkBeginCommandBuffer(commandBuffer, &beginInfo));
+   VK_VERIFY(device->vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
    VkClearValue clearValue = {
       .color.float32 = { 0.086f, 0.086f, 0.1137f, 1.0f, },
@@ -872,9 +863,9 @@ int DrawFrame(float dt)
       .clearValueCount = 1,
       .pClearValues = &clearValue,
    };
-   vk->vkCmdBeginRenderPass(commandBuffer, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+   device->vkCmdBeginRenderPass(commandBuffer, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-   vk->vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_resources.pipeline);
+   device->vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_resources.pipeline);
 
    s_cubeRot += dt * CUBE_SPIN_SPEED;
    s_cubeRot -= floorf(s_cubeRot);
@@ -889,15 +880,15 @@ int DrawFrame(float dt)
    mat4LookAt(&viewFromWorld, eye, target, up);
    mat4Mul(&viewFromLocal, &viewFromWorld, &worldFromLocal);
 
-   mat4PerspectiveFov(&clipFromView, PI / 2.0f, g_device.surfaceWidth / (float)g_device.surfaceHeight, 1.0f, 100.0f);
+   mat4PerspectiveFov(&clipFromView, PI / 2.0f, device->surfaceWidth / (float)device->surfaceHeight, 1.0f, 100.0f);
    mat4Mul(&matrices.clipFromLocal, &clipFromView, &viewFromLocal);
 
-   vk->vkCmdPushConstants(commandBuffer, s_resources.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(matrices), &matrices);
+   device->vkCmdPushConstants(commandBuffer, s_resources.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(matrices), &matrices);
 
-   vk->vkCmdDraw(commandBuffer, 36, 1, 0, 0);
+   device->vkCmdDraw(commandBuffer, 36, 1, 0, 0);
 
-   vk->vkCmdEndRenderPass(commandBuffer);
-   VK_VERIFY(vk->vkEndCommandBuffer(commandBuffer));
+   device->vkCmdEndRenderPass(commandBuffer);
+   VK_VERIFY(device->vkEndCommandBuffer(commandBuffer));
 
    VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
    VkSubmitInfo submitInfo = {
@@ -912,7 +903,7 @@ int DrawFrame(float dt)
       .pSignalSemaphores = &device->frames[curFrame].drawComplete,
    };
 
-   VK_VERIFY(vk->vkQueueSubmit(device->queue, 1, &submitInfo, device->frames[curFrame].frameComplete));
+   VK_VERIFY(device->vkQueueSubmit(device->queue, 1, &submitInfo, device->frames[curFrame].frameComplete));
 
    VkResult presentResult;
    VkPresentInfoKHR presentInfo = { 
@@ -926,7 +917,7 @@ int DrawFrame(float dt)
       .pResults = &presentResult,
    };
 
-   VK_VERIFY(vk->vkQueuePresentKHR(device->queue, &presentInfo));
+   VK_VERIFY(device->vkQueuePresentKHR(device->queue, &presentInfo));
    VK_VERIFY(presentResult);
 
    return 1;
